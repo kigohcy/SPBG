@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<!-- 處理實際已完成交易但 PENDING 欄位仍為未完成交易之旗標狀態 -->
+	
+	<camelContext messageHistory="false" trace="false"
+		id="camelRevisePending" xmlns="http://camel.apache.org/schema/spring">
+		<threadPoolProfile defaultProfile="false"
+			poolSize="1" maxPoolSize="1"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true" id="RevisePendingInThreadPool" />
+		<route id="camelRevisePending-process">
+			<from uri="sql:{{select_for_revisepending}}" />
+			<log message="${body}" />
+			<multicast parallelProcessing="true"
+				executorServiceRef="RevisePendingInThreadPool">
+				<to uri="bean:revisePendingJob?method=process" />
+			</multicast>
+		</route>
+		<route id="camelRevisePending-process-1">
+			<from uri="sql:SELECT MasterUnitId FROM TXNDETAIL WITH (NOLOCK) WHERE DetailUnitId > FORMAT(GETDATE(),'yyMMdd') AND DataKind ='110171_I' AND ResultCode != '105' ?consumer.delay=180000" />
+			<to uri="sql:UPDATE TXNMASTER SET PENDING='Y' WHERE MasterUnitId=:#MasterUnitId AND PENDING='N'" />
+		</route>
+		<route id="camelRevisePending-process-2">
+			<from uri="sql:SELECT MasterUnitId FROM TXNDETAIL M WITH (NOLOCK) WHERE DetailUnitId > FORMAT(GETDATE(),'yyMMdd') AND DataKind ='110171_I' AND ResultCode = '105' AND (select count(1) from TXNDETAIL D WITH (NOLOCK) WHERE M.MasterUnitId= D.MasterUnitId AND D.DataKind='000170_O')=0?consumer.delay=180000" />
+			<to uri="sql:UPDATE TXNMASTER SET DERRCODE=null WHERE MasterUnitId=:#MasterUnitId AND DERRCODE is not null" />
+		</route>
+	</camelContext>
+
+</beans>
