@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<!-- 4. Send Control --><!-- 5.Get Global Variable -->
+	<!-- use Camel property placeholder loaded from the given file --><!-- 1.掃MSGDATA --><!-- 2.Update MSGDATA Set ProcStatus=2 --><!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt --><!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+	<camelContext messageHistory="false" trace="false" id="camel110171_O"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- <propertyPlaceholder location="classpath:110171I.properties" id="placeholder"/> -->
+		<threadPoolProfile defaultProfile="false"
+			poolSize="1" maxPoolSize="1"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true" id="110171OutThreadPool" />
+		<route id="camel110171_O-process">
+			<from
+				uri="sql:{{select_110171_O}}{{consumer_onConsume}}{{update_TXNDETAIL_ProcStatus2}}" />
+			<to uri="mock:other" />
+		</route>
+		<route id="camel110171_O-process1">
+			<from uri="sql:{{select_110171_O2}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<!-- <to uri="sql:{{update_TXNDETAIL_ProcStatus2}}"/> -->
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<to uri="sql:{{select_110171_O_body}}" />
+			<!-- log message="${body}"/ -->
+			<split>
+				<simple>${body}</simple>
+				<multicast executorServiceRef="110171OutThreadPool" parallelProcessing="true">
+					<pipeline>
+						<to uri="bean:banSta110171Out?method=process" />
+
+						<choice>
+							<when>
+								<simple>${headers.P110171O_OK} == 'Y'</simple>
+								<log message="${body}" />
+								<setHeader headerName="INCHG_RLOGID">
+          							<simple>${header['RLOGID']}</simple>
+        						</setHeader>
+								<!-- 將 Body 中的 Camel 檔案物件變成 EDI 字串 -->
+								<convertBodyTo type="java.lang.String" />
+								<!-- 將 Body 中的 EDI 字串放到 Header 中 -->
+								<to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+								<!-- 送到非同步佇列中 -->
+								<to	uri="jms:EDIHUB_OUT_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=32" />
+								<to uri="sql:{{update_TXNDETAIL_ProcStatus3}}" />
+							</when>
+							<otherwise>
+								<to uri="sql:{{update_TXNDETAIL_ProcStatus4}}" />
+							</otherwise>
+						</choice>
+					</pipeline>
+				</multicast>
+			</split>
+		</route>
+	</camelContext>
+
+</beans>

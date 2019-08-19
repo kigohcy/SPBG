@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<!-- 異常通知 -->
+	<camel:camelContext id="camelAbnormalNotices"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="camelAbnormalNotices-process">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/15+08-21+?+*+MON-FRI -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice?cron={{cron.abnormal.notice.1}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+			<!-- 未完成逾時交易通知: 如果FEDI_ERR_TRNS_SENDRECV=Y, 檢查是否有未完成逾時交易 -->
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_SENDRECV=${header['FEDI_ERR_TRNS_SENDRECV']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_SENDRECV']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:overTimeTxnNoticeProcess?method=process" />
+					<camel:to
+						uri="bean:overTimeTxnNoticeProcess?method=processBook" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 交易訊息簽驗章失敗交易通知: 如果FEDI_ERR_TRNS_VERISIGN=Y, 檢查交易訊息簽驗章失敗交易 -->
+		<camel:route id="camelAbnormalNotices-process2">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/1+*+*+*+? -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice2?cron={{cron.abnormal.notice.2}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_VERISIGN=${header['FEDI_ERR_TRNS_VERISIGN']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_VERISIGN']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:txnCertErrorNoticeProcess?method=process" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 安控回應簽章失敗交易通知: 如果FEDI_ERR_TRNS_AUTACK=Y, 檢查安控回應簽章失敗交易 -->
+		<camel:route id="camelAbnormalNotices-process3">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/1+*+*+*+? -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice3?cron={{cron.abnormal.notice.3}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_AUTACK=${header['FEDI_ERR_TRNS_AUTACK']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_AUTACK']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:txnAutackCertSignErrorNoticeProcess?method=process" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 檢查需人工介入處理交易通知: 如果FEDI_ERR_TRNS_WAITTRAN=Y, 檢查需人工介入處理交易 -->
+		<camel:route id="camelAbnormalNotices-process4">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/1+*+*+*+? -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice4?cron={{cron.abnormal.notice.4}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_WAITTRAN=${header['FEDI_ERR_TRNS_WAITTRAN']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_WAITTRAN']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:manualInterventionRequiredNoticeProcess?method=process" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 自網發動扣他交易安控逾時交易通知: 如果FEDI_ERR_TRNS_X400ACK=Y, 檢查自網發動扣他交易安控逾時交易 -->
+		<camel:route id="camelAbnormalNotices-process5">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/15+08-21+?+*+MON-FRI -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice5?cron={{cron.abnormal.notice.5}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_X400ACK=${header['FEDI_ERR_TRNS_X400ACK']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_X400ACK']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:bankVanWithdrawOtherTxnOverTimeAutackNoticeProcess?method=process" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 自網發動扣他交易結果逾時交易通知: 如果FEDI_ERR_TRNS_X400TIMEOUT=Y, 檢查自網發動扣他交易結果逾時交易 -->
+		<camel:route id="camelAbnormalNotices-process6">
+			<!-- 1. 每 10 分鐘自動掃描目錄 0+*/15+08-21+?+*+MON-FRI -->
+			<camel:from
+				uri="quartz2://funbonAbnormalNotice6?cron={{cron.abnormal.notice.6}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:log loggingLevel="TRACE"
+				message="FEDI_ERR_TRNS_X400TIMEOUT=${header['FEDI_ERR_TRNS_X400TIMEOUT']}" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${header['FEDI_ERR_TRNS_X400TIMEOUT']} == 'Y'
+					</camel:simple>
+					<camel:to
+						uri="bean:bankVanWithdrawOtherTxnOverTimeResultNoticeProcess?method=process" />
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+
+		<!-- 檔案處理逾時通知 -->
+		<camel:route id="camelOverTimeFileNotices-process">
+			<camel:from
+				uri="quartz2://overTimeFile?cron={{cron.abnormal.notice.7}}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<camel:setHeader headerName="SYS_DIR">
+				<camel:constant>/FEDIRUN/</camel:constant>
+			</camel:setHeader>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+			<!-- 檔案最後修改時間逾時分鐘 -->
+			<camel:setHeader headerName="FEDI_ERR_TRNS_OVERTIME">
+				<camel:constant>10</camel:constant>
+			</camel:setHeader>
+
+
+			<!-- 財金跨行EDI檔案處理逾時通知 -->
+			<camel:setHeader headerName="NOTICE_TITLE">
+				<camel:constant>財金跨行EDI檔案處理逾時</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SCAN_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/FISC2EDI</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SILENT_MINUTES">
+				<camel:constant>30</camel:constant>
+			</camel:setHeader>
+			<camel:to
+				uri="bean:overTimeFileNoticeProcess?method=process" />
+
+			<!-- 財金跨網EDI檔案處理逾時通知 -->
+			<camel:setHeader headerName="NOTICE_TITLE">
+				<camel:constant>財金跨網EDI檔案處理逾時</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SCAN_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/NODE2EDI</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SILENT_MINUTES">
+				<camel:constant>30</camel:constant>
+			</camel:setHeader>
+			<camel:to
+				uri="bean:overTimeFileNoticeProcess?method=process" />
+
+			<!-- FTP 上傳財金跨行EDI檔案處理逾時通知 -->
+			<camel:setHeader headerName="NOTICE_TITLE">
+				<camel:constant>FTP 上傳財金EDI檔案處理逾時</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SCAN_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/EDI2FISC</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SILENT_MINUTES">
+				<camel:constant>30</camel:constant>
+			</camel:setHeader>
+			<camel:to
+				uri="bean:overTimeFileNoticeProcess?method=process" />
+
+			<!-- FTP 上傳財金跨網EDI檔案處理逾時通知 -->
+			<camel:setHeader headerName="NOTICE_TITLE">
+				<camel:constant>FTP 上傳財金EDI檔案處理逾時</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SCAN_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/NODE2FISC</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="NOTICE_SILENT_MINUTES">
+				<camel:constant>30</camel:constant>
+			</camel:setHeader>
+			<camel:to
+				uri="bean:overTimeFileNoticeProcess?method=process" />
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

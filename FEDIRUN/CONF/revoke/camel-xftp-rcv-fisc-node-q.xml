@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<!-- RcvFiscNode接收財金來的跨網訊息處理 PROCESS NAME：RcvFiscNode -->
+	<camel:camelContext id="camelXftpRcvFiscNode"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="camelXftpRcvFiscNode-process">
+			<!-- 1. 每 12 秒 timer 自動 -->
+			<camel:from
+				uri="quartz2://ftpRcvFiscNode?cron=0/12+*+*+1/1+*+?+*" />
+			<camel:onException useOriginalMessage="true">
+				<camel:exception>
+					java.net.ConnectException
+				</camel:exception>
+				<camel:handled>
+					<camel:constant>true</camel:constant>
+				</camel:handled>
+				<camel:log loggingLevel="ERROR"
+					message="財金跨網 FTP 無法建立連線 (下傳)" />
+				<!-- 載入參數表 -->
+				<camel:to
+					uri="bean:loadParametersIntoHeaderProcess?method=process" />
+				<camel:setHeader headerName="FISC_ERROR">
+					<camel:constant>財金跨網 FTP 無法建立連線 (下傳)</camel:constant>
+				</camel:setHeader>
+				<camel:to
+					uri="bean:fiscConnectionAbnormalNoticeProcess?method=process" />
+			</camel:onException>
+			<camel:onException useOriginalMessage="true">
+				<camel:exception>
+					java.lang.Throwable
+				</camel:exception>
+				<camel:log loggingLevel="ERROR"
+					message="財金跨網 FTP 連線異常 (下傳)" />
+				<!-- 載入參數表 -->
+				<camel:to
+					uri="bean:loadParametersIntoHeaderProcess?method=process" />
+				<camel:to
+					uri="bean:fiscConnectionAbnormalNoticeProcess?method=process" />
+			</camel:onException>
+			<camel:pipeline>
+				<!-- 跨網 -->
+				<!-- 處理日期時間=系統日期時間 -->
+				<camel:setHeader headerName="processDateTime">
+					<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+				</camel:setHeader>
+
+				<camel:setHeader
+					headerName="STOP_ROUTE_PARAMETER_NAME">
+					<camel:constant>XFTP_ACTIVE</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader
+					headerName="STOP_ROUTE_ACTIVE_VALUE">
+					<camel:constant>Y</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_ID">
+					<camel:constant>xftpRcvFiscNodeRoute</camel:constant>
+				</camel:setHeader>
+
+				<!-- 載入參數表 -->
+				<camel:to
+					uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+				<!-- 檢查是否要關閉此 CamelRoute -->
+				<camel:to
+					uri="bean:stopRouteIfInactiveProcess?method=process" />
+				<!-- 將登入財金 FEDI TCP/IP FTP 帳戶資訊轉成 XFTP 元件的格式 -->
+				<camel:setHeader headerName="NODE_BANK_VAN_ID">
+					<camel:simple>${header['VAN_VAN_ID']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_VAN_PASSWD">
+					<camel:simple>${header['VAN_VAN_PASSWD']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_EDI_ID">
+					<camel:simple>${header['VAN_EDI_ID']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_EDI_PASSWD">
+					<camel:simple>${header['VAN_EDI_PASSWD']}</camel:simple>
+				</camel:setHeader>
+
+				<camel:log loggingLevel="TRACE"
+					message="XFTP_ACTIVE = ${header['XFTP_ACTIVE']}" />
+
+
+				<!-- 檢查是否啟用 XFTP 功能 -->
+				<camel:choice>
+					<camel:when>
+						<camel:simple>${header['XFTP_ACTIVE']} == 'Y'</camel:simple>
+						<camel:setHeader headerName="XFTP_DOWNLOAD_PATH">
+							<camel:constant>/FEDIRUN/COMM/FISC/NODE2EDI/</camel:constant>
+						</camel:setHeader>
+						<camel:to
+							uri="bean:receiveFiscNodeProcess?method=process" />
+
+
+						<camel:choice>
+							<camel:when>
+								<camel:simple>${body} != null</camel:simple>
+								<camel:log loggingLevel="INFO"
+									message="Sending EDI to EDIHUB_IN_Q: ${body}" />
+								<!-- 送到非同步佇列中 -->
+								<camel:to
+									uri="jms:EDIHUB_IN_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=8" />
+							</camel:when>
+						</camel:choice>
+
+
+
+					</camel:when>
+				</camel:choice>
+
+			</camel:pipeline>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

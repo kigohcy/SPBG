@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<camel:camelContext messageHistory="false" id="camelEdihubOut"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:threadPoolProfile id="edihubOutThreadPool"
+			defaultProfile="false" poolSize="8"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxPoolSize="32"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort" />
+		<camel:dataFormats>
+			<camel:jaxb id="fediJaxb" prettyPrint="true"
+				contextPath="com.hitrust.fedi.xml" />
+		</camel:dataFormats>
+		<camel:route id="camelEdihubOut-process">
+			<!-- 1. 從非同步佇列中接收 EDI 字串 -->
+			<camel:from
+				uri="jms:EDIHUB_OUT_Q?jmsMessageType=text&amp;concurrentConsumers=8&amp;maxConcurrentConsumers=32" />
+			<camel:onException useOriginalMessage="false">
+				<camel:exception>
+					java.lang.Throwable
+				</camel:exception>
+				<camel:to uri="bean:exceptionAlertProcess?method=process" />
+				<camel:choice>
+					<camel:when>
+						<camel:simple>${header['PROCESSING_COUNT_OF_THE_FILE']} >=
+							${header['FILE_RETRY_MAX_LIMIT']}
+						</camel:simple>
+						<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+						<camel:to
+							uri="file:/FEDIRUN/EDIHUB/OUT_FAIL?fileName=${header['EDI_NAME']}&amp;charset=MS950" />
+					</camel:when>
+					<!-- <camel:otherwise> <camel:log loggingLevel="INFO" message="${body}" 
+						/> <camel:to uri="jms:EDIHUB_OUT_Q?concurrentConsumers=32&amp;maxConcurrentConsumers=256" 
+						/> </camel:otherwise> -->
+				</camel:choice>
+			</camel:onException>
+
+			<camel:multicast executorServiceRef="edihubOutThreadPool"
+				parallelProcessing="true">
+				<camel:pipeline>
+					<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+					<!-- 載入參數表 -->
+					<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+					<!-- 記錄檔案處理次數是否超過限制 -->
+					<camel:to uri="bean:recordCountForFileHandlerProcess?method=process" />
+
+					<!-- 檢查檔案處理次數是否超過限制 -->
+					<camel:choice>
+						<camel:when>
+							<camel:simple>${header['PROCESSING_COUNT_OF_THE_FILE']} >=
+								${header['FILE_RETRY_MAX_LIMIT']}
+							</camel:simple>
+							<camel:to
+								uri="file:/FEDIRUN/EDIHUB/OUT_FAIL?fileName=${header['EDI_NAME']}&amp;charset=MS950" />
+						</camel:when>
+						<camel:otherwise>
+							<camel:choice>
+								<camel:when>
+									<!-- 本行網域別(PARAMETER.VAB_EDI_QUAL) -->
+									<camel:simple>${header['VAB_EDI_QUAL']} == null </camel:simple>
+									<camel:log loggingLevel="ERROR"
+										message="本行網域別(PARAMETER.VAB_EDI_QUAL)=${header['VAB_EDI_QUAL']}" />
+								</camel:when>
+								<camel:otherwise>
+									<camel:setHeader headerName="EDI_NAME">
+										<camel:simple>${header['INCHG_RLOGID']}
+										</camel:simple>
+									</camel:setHeader>
+									<camel:log loggingLevel="INFO"
+										message="EDIHUB_OUT_START: ${header['EDI_NAME']}" />
+									<camel:to
+										uri="bean:ediCamelFileToInterchangeListProcess?method=process" />
+									<camel:split>
+										<camel:simple>${body}</camel:simple>
+										<camel:to uri="bean:ediStringToXmlProcess?method=process" />
+										<camel:choice>
+											<camel:when>
+												<camel:simple>${header['FEDISyntaxExceptionHandler_Unrecoverable_Size']}
+													> 0
+												</camel:simple>
+												<camel:log loggingLevel="ERROR"
+													message="Skipping XML unmarshal: ${header['EDI_NAME']}" />
+											</camel:when>
+											<camel:otherwise>
+												<camel:log loggingLevel="TRACE"
+													message="Unmarshaling XML: ${header['EDI_NAME']}" />
+												<camel:unmarshal ref="fediJaxb" />
+												<camel:log loggingLevel="TRACE"
+													message="Unmarshaled XML: ${header['EDI_NAME']}" />
+											</camel:otherwise>
+										</camel:choice>
+										<camel:to uri="bean:edihubOutInterchangeProcess?method=process" />
+										<camel:log loggingLevel="INFO"
+											message="EDIHUB_OUT_END: ${header['EDI_NAME']}" />
+									</camel:split>
+								</camel:otherwise>
+							</camel:choice>
+						</camel:otherwise>
+					</camel:choice>
+				</camel:pipeline>
+			</camel:multicast>
+		</camel:route>
+	</camel:camelContext>
+</beans>

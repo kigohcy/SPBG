@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelPackFiscNode"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="camelPackFiscNode-process">
+			<!-- 1. 每 30 秒 timer 自動掃描 INCHG -->
+			<camel:from
+				uri="quartz2://packFiscNode?cron={{cron.pack.fisc.node}}" />
+			<camel:onException>
+				<camel:exception>
+					org.springframework.dao.DeadlockLoserDataAccessException
+				</camel:exception>
+				<camel:log loggingLevel="INFO"
+					message="Data Busy (DeadlockLoserDataAccessException), will retry later!" />
+			</camel:onException>
+			<camel:onException>
+				<camel:exception>
+					org.hibernate.exception.LockAcquisitionException
+				</camel:exception>
+				<camel:log loggingLevel="INFO"
+					message="Data Busy ((LockAcquisitionException), will retry later!" />
+			</camel:onException>
+			<!-- 2. 將全部的批次包含在同一個通道中 -->
+			<camel:pipeline>
+				<!-- 2.1 設定 Message Header 初始資料 -->
+				<!-- 載入參數表 -->
+				<camel:to
+					uri="bean:loadParametersIntoHeaderProcess?method=process" />
+				<camel:log loggingLevel="TRACE"
+					message="營業日期 = ${header['TRADE_DATE']}" />
+
+				<!-- 今日=系統日期 -->
+				<camel:setHeader headerName="today">
+					<camel:simple>${date:now:yyyyMMdd}</camel:simple>
+				</camel:setHeader>
+				<!-- 今日=系統日期 -->
+				<camel:setHeader headerName="todayTime">
+					<camel:simple>${date:now:HHmmss}</camel:simple>
+				</camel:setHeader>
+				<!-- 處理日期時間=系統日期時間 -->
+				<camel:setHeader headerName="processDateTime">
+					<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+				</camel:setHeader>
+				<!-- 每批處理交易明細數量 -->
+				<camel:setHeader headerName="batch.size">
+					<camel:simple>${header['FWD_FISC_MAX_SIZE']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="RLOGID_appType">
+					<camel:constant>YRID</camel:constant>
+				</camel:setHeader>
+				<!-- 檔案輸出目錄，不設定則不產生檔案 -->
+				<camel:setHeader headerName="OUTPUT_DIRECTORY">
+				<camel:constant>/FEDIRUN/COMM/FISC/NODE2FISC</camel:constant>
+				</camel:setHeader>
+
+				<camel:log loggingLevel="TRACE"
+					message="每批處理交易明細數量 = ${header['batch.size']}" />
+				<camel:log loggingLevel="TRACE"
+					message="FISC_EDI_ID = ${header['FISC_EDI_ID']}" />
+				<camel:log loggingLevel="TRACE"
+					message="MYBANK_EDI_ID = ${header['MYBANK_EDI_ID']}" />
+				<camel:log loggingLevel="TRACE"
+					message="FISC_EDI_QUAL = ${header['FISC_EDI_QUAL']}" />
+				<camel:to uri="bean:packFiscNodeProcess?method=process" />
+			</camel:pipeline>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

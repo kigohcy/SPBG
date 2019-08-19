@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+
+
+	<!-- 4. Send Control --><!-- 5.Get Global Variable -->
+	<!-- use Camel property placeholder loaded from the given file --><!-- 1.掃MSGDATA --><!-- 2.Update MSGDATA Set ProcStatus=2 --><!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt --><!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+	<camelContext messageHistory="false" trace="false" id="camel110151_I"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- <propertyPlaceholder location="classpath:110151I.properties" id="placeholder"/> -->
+		<threadPoolProfile defaultProfile="false"
+			poolSize="1" maxPoolSize="1"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true" id="110151InThreadPool" />
+		<route id="camel110151_I-process">
+			<!-- 1.掃MSGDATA -->
+			<from
+				uri="sql:{{select_110151_I}}{{consumer_onConsume}}{{update_MSGDATA_ProcStatus2}}" />
+			<!-- <log message="${body}"/> -->
+			<to uri="mock:other" />
+		</route>
+		<route id="camel110151_I-process1">
+			<from uri="sql:{{select_110151_I2}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<!-- 2.Update MSGDATA Set ProcStatus=2 -->
+			<!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt -->
+			<to uri="sql:{{update_INCHG_TakeCntPlus1A}}" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<to uri="sql:{{select_IN_body}}" />
+			<log message="${body}" />
+			<split>
+				<simple>${body}</simple>
+				<multicast executorServiceRef="110151InThreadPool" parallelProcessing="true">
+					<pipeline>
+						<to uri="bean:banSta110151In?method=process" />
+						<choice>
+							<when>
+								<simple>${headers.P110151I_OK} == 'Y'</simple>
+								<to uri="sql:{{update_MSGDATA_ProcStatus3}}" />
+							</when>
+							<otherwise>
+								<to uri="sql:{{update_MSGDATA_ProcStatus4}}" />
+							</otherwise>
+						</choice>
+					</pipeline>
+				</multicast>
+			</split>
+		</route>
+	</camelContext>
+
+</beans>

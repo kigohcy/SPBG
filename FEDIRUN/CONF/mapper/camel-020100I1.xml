@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+
+	<!-- use Camel property placeholder loaded from the given file -->
+	<camelContext messageHistory="false" trace="false" id="camel020100_I1"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- use Camel property placeholder loaded from the given file -->
+		<!-- <propertyPlaceholder location="classpath:020100I.properties" id="placeholder" 
+			/> -->
+
+		<threadPoolProfile defaultProfile="false" poolSize="16" 
+			maxPoolSize="32" keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" 
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort" 
+			customId="true" id="020100InThreadPool" />
+		<route id="camel020100_I1-process">
+			<!-- 1.掃MSGDATA -->
+			<from
+				uri="sql:{{select_020100_I}}{{consumer_onConsume}}{{update_MSGDATA_ProcStatus2}}" />
+			<!-- <to uri="mock:other" /> -->
+			<to uri="jms:020100IQ" />
+		</route>	
+		<route id="camel020100_I1-1">
+		    <from uri="jms:020100IQ?concurrentConsumers=8&amp;maxConcurrentConsumers=32" />
+			<!-- 2.Update MSGDATA Set ProcStatus=2 -->
+			<!--<to uri="sql:{{update_MSGDATA_ProcStatus2}}" /> -->
+			<!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt -->
+			<to uri="sql:{{update_INCHG_TakeCntPlus1A}}" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<to uri="sql:{{select_IN_body}}" />
+			<log message="${body}" />
+			<split>
+				<simple>${body}</simple>
+				<!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+				<multicast executorServiceRef="020100InThreadPool" parallelProcessing="true">
+					<pipeline>
+						<to uri="bean:payExt020100In?method=process" />
+
+						<choice>
+							<when>
+								<simple>${headers.P020100I_OK} == 'Y'</simple>
+								 <to uri="sql:{{update_MSGDATA_ProcStatus3}}" />
+								 <choice>
+									<when>
+										<simple>${headers.MAKE_HOST_REQUEST} != null</simple>
+										<to uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=48" />
+									</when>
+								</choice>
+							</when>
+							<otherwise>
+								<to uri="sql:{{update_MSGDATA_ProcStatus4}}" />
+							</otherwise>
+						</choice>
+					</pipeline>
+				</multicast>
+
+			</split>
+		</route>
+	</camelContext>
+
+</beans>

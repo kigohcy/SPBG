@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelXftpFwdFiscNode"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="camelXftpFwdFiscNode-process">
+			<!-- 1. 每 1 秒自動掃描目錄 -->
+			<camel:from
+				uri="file:/FEDIRUN/COMM/FISC/NODE2FISC?readLock=idempotentRepository&amp;delay=7000&amp;move=BACKUP" />
+			<!-- <camel:from uri="jms:PACK_FISC_NODE?jmsMessageType=text&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1&amp;asyncConsumer=false" 
+				/> -->
+			<camel:onException>
+				<camel:exception>
+					com.hitrust.fedi.xftp.XFtpNoRetryException
+				</camel:exception>
+				<camel:to uri="bean:errlogProcess?method=process" />
+				<camel:to uri="file:/FEDIRUN/COMM/FISC/NODE2FISC_FAIL" />
+			</camel:onException>
+			<camel:pipeline>
+				<camel:setHeader headerName="sLogId">
+					<camel:simple>${file:name}</camel:simple>
+				</camel:setHeader>
+				<!-- 處理日期時間=系統日期時間 -->
+				<camel:setHeader headerName="processDateTime">
+					<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_PARAMETER_NAME">
+					<camel:constant>XFTP_ACTIVE</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_ACTIVE_VALUE">
+					<camel:constant>Y</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_ID">
+					<camel:constant>fwdFiscNodeRoute</camel:constant>
+				</camel:setHeader>
+
+				<!-- 載入參數表 -->
+				<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+				<!-- 檢查是否要關閉此 CamelRoute -->
+				<camel:to uri="bean:stopRouteIfInactiveProcess?method=process" />
+
+
+				<!-- 將登入財金 FEDI TCP/IP FTP 帳戶資訊轉成 XFTP 元件的格式 -->
+				<camel:setHeader headerName="NODE_BANK_VAN_ID">
+					<camel:simple>${header['VAN_VAN_ID']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_VAN_PASSWD">
+					<camel:simple>${header['VAN_VAN_PASSWD']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_EDI_ID">
+					<camel:simple>${header['VAN_EDI_ID']}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="NODE_BANK_EDI_PASSWD">
+					<camel:simple>${header['VAN_EDI_PASSWD']}</camel:simple>
+				</camel:setHeader>
+
+				<!-- 檢查是否啟用 XFTP 功能 -->
+				<camel:choice>
+					<camel:when>
+						<camel:simple>${header['XFTP_ACTIVE']} == 'Y'</camel:simple>
+						<!-- 從 DB 取出 Forward 次數 -->
+						<camel:to uri="bean:getForwardCountProcess?method=process" />
+						<camel:log loggingLevel="INFO" message="處理檔案 ${header['sLogId']}" />
+						<!-- 檢查檔案處理次數是否超過限制 -->
+						<camel:log loggingLevel="INFO"
+							message="FORWARD_COUNT=${header['FORWARD_COUNT']}" />
+						<camel:log loggingLevel="INFO"
+							message="FWD_FISC_MAX_SIZE=${header['FWD_FISC_MAX_SIZE']}" />
+
+						<camel:choice>
+							<camel:when>
+								<camel:simple>${header['FORWARD_COUNT']} >=
+									${header['FWD_FISC_MAX_SIZE']}
+								</camel:simple>
+								<camel:to uri="file:/FEDIRUN/COMM/FISC/NODE2FISC_FAIL" />
+							</camel:when>
+							<camel:otherwise>
+								<camel:to
+									uri="bean:forwardFiscNodeUpdateInterchangeProcess?method=process" />
+								<camel:choice>
+									<camel:when>
+										<camel:simple>${header['XFtpNoRetryException']} == 'TRUE'
+										</camel:simple>
+										<camel:to uri="file:/FEDIRUN/COMM/FISC/NODE2FISC_FAIL" />
+									</camel:when>
+									<camel:otherwise>
+										<camel:to uri="file:/FEDIRUN/COMM/FISC/NODE2FISC_OK" />
+										<camel:to
+											uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									</camel:otherwise>
+								</camel:choice>
+							</camel:otherwise>
+						</camel:choice>
+					</camel:when>
+
+				</camel:choice>
+			</camel:pipeline>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelTelegam-fedi2host"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:threadPoolProfile id="threadPool"
+			defaultProfile="true" poolSize="16"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxPoolSize="48"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			allowCoreThreadTimeOut="false" rejectedPolicy="Abort" />
+		<camel:route id="telegram-fedi2host">
+			<!-- 頻率: 每 5 秒自動執行 -->
+			<camel:from
+				uri="jms:FEDI2HOST_Q?jmsMessageType=object&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=48" />
+			<camel:onException>
+				<camel:exception>
+					com.hitrust.fedi.process.host.req.RejectHostRequestException
+				</camel:exception>
+				<camel:handled>
+					<camel:constant>true</camel:constant>
+				</camel:handled>
+				<camel:to uri="bean:saveHosttxProcess?method=process" />
+				<camel:setHeader headerName="ProcStatus">
+					<camel:constant>4</camel:constant>
+				</camel:setHeader>
+				<camel:to
+					uri="bean:updateTxnDetailFileContentProcStatusProcess?method=process" />
+			</camel:onException>
+
+			<!-- 載入參數表 -->
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<!-- 起始 HOSTTX -->
+			<camel:to
+				uri="bean:createHostTxObjectProcess?method=process" />
+			<camel:split>
+				<camel:simple>${body}</camel:simple>
+				<camel:pipeline>
+					<camel:multicast executorServiceRef="threadPool"
+						parallelProcessing="true">
+						<camel:pipeline>
+							<!-- 退款交易處理: 處理時機：$sMsgType =‘012’ -->
+							<camel:to
+								uri="bean:verifyRefundTxProcess?method=process" />
+							<!-- 授扣客戶約定入帳合法性檢核 -->
+							<camel:to
+								uri="bean:verifyDepositAccountProcess?method=process" />
+							<!-- 手續費計算 -->
+							<camel:to uri="bean:calculateFeeProcess?method=process" />
+							<camel:to uri="bean:saveHosttxProcess?method=process" />
+						</camel:pipeline>
+					</camel:multicast>
+				</camel:pipeline>
+			</camel:split>
+			<camel:log loggingLevel="TRACE" message="Job finished!" />
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

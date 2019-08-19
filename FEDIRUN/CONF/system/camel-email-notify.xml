@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="emailNotifier"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="email-notice-process">
+			<!-- 1. 從佇列中接收 E-Mail 任務 -->
+			<camel:from
+				uri="jms:SEND_MAIL?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1&amp;asyncConsumer=false" />
+			<camel:onException>
+				<camel:exception>
+					org.hibernate.PropertyAccessException
+				</camel:exception>
+				<camel:exception>
+					org.hibernate.AssertionFailure
+				</camel:exception>
+				<camel:exception>
+					org.hibernate.QueryParameterException
+				</camel:exception>
+				<camel:exception>
+					org.hibernate.exception.SQLGrammarException
+				</camel:exception>
+				<camel:exception>
+					org.hibernate.exception.ConstraintViolationException
+				</camel:exception>
+				<camel:exception>
+					org.hibernate.exception.DataException
+				</camel:exception>
+				<camel:exception>
+					org.springframework.dao.DuplicateKeyException
+				</camel:exception>
+				<camel:log loggingLevel="ERROR" message="Database related error!" />
+			</camel:onException>
+			<camel:onException>
+				<camel:exception>
+					java.lang.Throwable
+				</camel:exception>
+				<camel:log loggingLevel="ERROR" message="Send mail error!" />
+			</camel:onException>
+			<!-- 2. 載入參數表 -->
+			<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<!-- 3. 發送郵件 -->
+			<camel:to uri="bean:emailNotifyProcess?method=process" />
+		</camel:route>
+
+	</camel:camelContext>
+</beans>
+

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+
+	<!-- use Camel property placeholder loaded from the given file -->
+	<camelContext messageHistory="false" trace="false" id="camelSimHost_I2"
+		xmlns="http://camel.apache.org/schema/spring">
+		<threadPoolProfile defaultProfile="false" poolSize="8"
+			maxPoolSize="20" keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort"
+			customId="true" id="SimHostInThreadPool" />
+		<route id="camelSimHost_I2-process0">
+			<!-- <from uri="direct:start" /> -->
+			<from uri="timer://runOnce?repeatCount=1&amp;delay=30000" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<choice>
+				<when>
+					<simple>${headers.SIMHOST_MODE} == 'ON'</simple>
+					<log loggingLevel="INFO"
+						message="SIMHOST_MODE_START: ${header['SIMHOST_MODE']}" />
+					<to
+						uri="controlbus:route?routeId=camelSimHost_I2-process1&amp;action=start" />
+				</when>
+				<otherwise>
+					<to uri="mock:other" />
+				</otherwise>
+			</choice>
+
+		</route>
+
+		<route id="camelSimHost_I2-process1" autoStartup="false">
+			<from
+				uri="file:/FEDIRUN/HOST/REQUEST/IN?charset=MS950&amp;delay=300&amp;move=../OK" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<setHeader headerName="FileNameIn">
+				<simple>${file:onlyname}</simple>
+			</setHeader>
+			<setHeader headerName="CamelFileName">
+				<simple>${in.header.FileNameIn.replaceAll("-1.DAT","")}-2.DAT</simple>
+			</setHeader>
+			<!-- <convertBodyTo type="java.lang.String"/> -->
+			<split>
+			    <simple>${body}</simple>
+				<!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+				<multicast executorServiceRef="SimHostInThreadPool" parallelProcessing="true">
+				  <pipeline>
+				   <to uri="bean:simuateHost?method=process" />
+				   <to uri="file:/FEDIRUN/HOST/RESPONSE/OUT?fileName=${header['CamelFileName']}&amp;charset=MS950" />
+				  </pipeline>
+				</multicast>
+			</split>
+			
+
+		</route>
+
+	</camelContext>
+
+</beans>

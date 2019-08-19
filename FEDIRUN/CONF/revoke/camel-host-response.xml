@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelHostRes"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:threadPoolProfile id="hostResThreadPool"
+			defaultProfile="true" poolSize="16"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxPoolSize="48"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			allowCoreThreadTimeOut="false" rejectedPolicy="Abort" />
+		<camel:route id="camelHostRes-processRemoteFile">
+			<!-- 1. 從 JMS Queue 收 2.DAT, 3.DAT 之內容 -->
+			<camel:from
+				uri="jms:RCV_REMOTE_HOST_RES_Q?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1&amp;asyncConsumer=false" />
+			<!-- 2. 取出檔案名稱放到 Header: newFileName -->
+			<camel:to uri="bean:putRemoteFilenameInHeaderProcess?method=process" />
+			<camel:log loggingLevel="INFO"
+				message="Received and saving remote file content: ${header['newFileName']}" />
+			<camel:to
+				uri="file:/FEDIRUN/HOST/RESPONSE/OUT?fileName=${header['newFileName']}&amp;charset=MS950" />
+			<camel:log loggingLevel="INFO"
+				message="Saved remote file content: ${header['newFileName']}" />
+		</camel:route>
+		<camel:route id="camelHostRes-process">
+			<!-- 1. 每 1 秒自動掃描目錄 -->
+			<camel:from
+				uri="file:/FEDIRUN/HOST/RESPONSE/OUT?readLock=idempotentRepository&amp;charset=MS950&amp;delay=300&amp;move=BACKUP" />
+			<camel:onException>
+				<camel:exception>
+					java.lang.Throwable
+				</camel:exception>
+				<camel:to uri="bean:errlogProcess?method=process" />
+				<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+				<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_FAIL" />
+			</camel:onException>
+
+			<!-- 能支援multi-thread功能 -->
+			<camel:multicast executorServiceRef="hostResThreadPool"
+				parallelProcessing="true">
+				<camel:pipeline>
+					<camel:to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+					<!-- 載入參數表 -->
+					<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+					<!-- 記錄檔案處理次數是否超過限制 -->
+					<camel:to uri="bean:recordCountForFileHandlerProcess?method=process" />
+					<!-- 檢查檔案處理次數是否超過限制 -->
+					<camel:log loggingLevel="INFO"
+						message="PROCESSING_COUNT_OF_THE_FILE=${header['PROCESSING_COUNT_OF_THE_FILE']}" />
+					<camel:log loggingLevel="INFO"
+						message="FILE_RETRY_MAX_LIMIT=${header['FILE_RETRY_MAX_LIMIT']}" />
+					<camel:choice>
+						<camel:when>
+							<camel:simple>${header['PROCESSING_COUNT_OF_THE_FILE']} >=
+								${header['FILE_RETRY_MAX_LIMIT']}
+							</camel:simple>
+							<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_FAIL" />
+						</camel:when>
+						<camel:otherwise>
+							<camel:unmarshal>
+								<camel:univocity-fixed>
+									<!-- 第1-8碼 -->
+									<camel:univocity-header length="8" />
+									<!-- $sPcode = 第9-12碼 char(4) 交易代號 ‘0001’代表FEDI -->
+									<camel:univocity-header length="4" />
+									<!-- $sHostResult = 第13-16碼 char(4) 帳務主機處理結果代碼 -->
+									<camel:univocity-header length="4" />
+									<!-- $sEdiId = 第17-28碼 char(12) 原付款指示交易EDI用戶代碼 -->
+									<camel:univocity-header length="12" />
+									<!-- $sStan = 第29-35碼 -char(7) 原付款指示交易流水號 -->
+									<camel:univocity-header length="7" />
+									<!-- 第36-55碼 -->
+									<camel:univocity-header length="20" />
+									<!-- $sAekDate = 第56-69碼 char(14) 原付款指示交易日期 -->
+									<camel:univocity-header length="14" />
+									<!-- 第70-105碼 -->
+									<camel:univocity-header length="36" />
+									<!-- $sMsgType = 第106-108碼 char(3) 交易類型 -->
+									<camel:univocity-header length="3" />
+									<!-- $iFee = 第109-115碼 number(7.2) 手續費金額(後2位為小數) -->
+									<camel:univocity-header length="7" />
+									<!-- $sClearDate = 第116-122碼民國年YYYMMDD要轉為西元年CCYYMMDD -->
+									<camel:univocity-header length="7" />
+									<!-- $sRmtFlag = 第123碼 char(1) 轉通匯別 (只有$sMsgType=‘002’扣自入他交易才會有值) -->
+									<camel:univocity-header length="1" />
+								</camel:univocity-fixed>
+							</camel:unmarshal>
+							<camel:setHeader headerName="pcode">
+								<camel:simple>${body[0][1]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="hostResult">
+								<camel:simple>${body[0][2]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="ediId">
+								<camel:simple>${body[0][3]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="stan">
+								<camel:simple>${body[0][4]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="aekDate">
+								<camel:simple>${body[0][6]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="msgType">
+								<camel:simple>${body[0][8]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="fee">
+								<camel:simple>${body[0][9]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="clearDate">
+								<camel:simple>${body[0][10]}</camel:simple>
+							</camel:setHeader>
+							<camel:setHeader headerName="rmtFlag">
+								<camel:simple>${body[0][11]}</camel:simple>
+							</camel:setHeader>
+							<camel:log loggingLevel="INFO"
+								message="pcode=${header['pcode']}, hostResult=${header['hostResult']}, ediId=${header['ediId']}, stan=${header['stan']}, aekDate=${header['aekDate']}, msgType=${header['msgType']}, fee=${header['fee']}, clearDate=${header['clearDate']}, rmtFlag=${header['rmtFlag']}" />
+							<!-- 支援依據交易類型及帳務主機處理結果，來決定交易後續處理方向 -->
+							<camel:choice>
+								<camel:when>
+									<!-- 扣自入自交易處理: 處理時機：$sMsgType =‘001’ -->
+									<camel:simple>${header['msgType']} == '001'</camel:simple>
+									<camel:to
+										uri="bean:hostResponseWithdrawSelfDepositSelfProcess?method=process" />
+									<camel:to
+										uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+									<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_OK" />
+								</camel:when>
+								<camel:when>
+									<!-- 扣自入他交易處理: 處理時機：$sMsgType =‘002’ -->
+									<camel:simple>${header['msgType']} == '002'</camel:simple>
+									<camel:to
+										uri="bean:convertDerrcodeHostResponseWithdrawSelfDepositOtherProcess?method=process" />
+									<camel:to
+										uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+									<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_OK" />
+								</camel:when>
+								<camel:when>
+									<!-- 跨行入帳交易處理: 處理時機：$sMsgType =‘003’ -->
+									<camel:simple>${header['msgType']} == '003'</camel:simple>
+									<camel:to
+										uri="bean:convertDerrcodeHostResponseInterbankProcess?method=process" />
+									<camel:to
+										uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+									<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_OK" />
+								</camel:when>
+								<camel:when>
+									<!-- 退款交易處理: 處理時機：$sMsgType =‘012’ -->
+									<camel:simple>${header['msgType']} == '012'</camel:simple>
+									<camel:to
+										uri="bean:hostResponseInterbankRefundProcess?method=process" />
+									<camel:to
+										uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+									<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_OK" />
+								</camel:when>
+								<camel:otherwise>
+									<camel:log loggingLevel="ERROR"
+										message="未支援之交易類型 = ${header['sMsgType']}" />
+									<camel:to uri="bean:placeHeaderIntoBodyProcess?method=process" />
+									<camel:to uri="file:/FEDIRUN/HOST/RESPONSE/OUT_FAIL" />
+								</camel:otherwise>
+							</camel:choice>
+						</camel:otherwise>
+					</camel:choice>
+				</camel:pipeline>
+			</camel:multicast>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

@@ -1,0 +1,103 @@
+status = info
+name= properties_configuration
+property.basePath =/FEDIRUN/LOG
+
+appender.stdout.type = Console
+appender.stdout.name = stdout
+appender.stdout.target = SYSTEM_OUT
+appender.stdout.layout.type = PatternLayout
+#appender.console.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %level [%t] [%c] [%M] [%l] - %msg%n
+appender.stdout.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%t] (%F:%L) - %m%n
+
+appender.F1.type = RollingFile
+appender.F1.name = F1
+appender.F1.fileName = ${basePath}/fedi-all.log
+appender.F1.filePattern = ${basePath}/fedi-all.%d{yyyyMMdd}-%i.zip
+appender.F1.layout.type = PatternLayout
+#appender.F1.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %level [%t] [%c] [%M] [%l] - %msg%n
+appender.F1.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%t] (%F:%L) - %m%n
+appender.F1.policies.type = Policies
+appender.F1.policies.time.type = TimeBasedTriggeringPolicy
+appender.F1.policies.startup.type = OnStartupTriggeringPolicy
+#appender.F1.policies.startup.minSize = 100
+appender.F1.policies.size.type = SizeBasedTriggeringPolicy
+appender.F1.policies.size.size = 100MB
+appender.F1.policies.time.interval = 1
+appender.F1.policies.time.modulate = true
+appender.F1.strategy.type = DefaultRolloverStrategy
+appender.F1.strategy.delete.type = Delete
+appender.F1.strategy.delete.basePath = ${basePath}
+appender.F1.strategy.delete.maxDepth = 1
+appender.F1.strategy.delete.ifLastModified.type = IfLastModified
+# Delete files older than 180 days
+appender.F1.strategy.delete.ifLastModified.age = 180d
+
+
+filter.threshold.type = ThresholdFilter
+# \u53ea\u8bb0\u5f55debug\u7ea7\u522b\u4ee5\u4e0a\u7684\u65e5\u5fd7\uff0c\u5927\u5c0f\u5199\u65e0\u5173\uff1a(ALL<)TRACE<DEBUG<INFO<WARN<ERROR<FATAL(<OFF)
+filter.threshold.level = TRACE
+
+appender.F2.type = RollingFile
+appender.F2.name = F2
+appender.F2.filter.threshold.type = ThresholdFilter
+appender.F2.filter.threshold.level = ERROR
+appender.F2.fileName = ${basePath}/fedi-error.log
+appender.F2.filePattern = ${basePath}/fedi-error.%d{yyyyMMdd}-%i.zip
+appender.F2.layout.type = PatternLayout
+#appender.F2.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %level [%t] [%c] [%M] [%l] - %msg%n
+appender.F2.layout.pattern = %d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%t] (%F:%L) - %m%n
+appender.F2.policies.type = Policies
+appender.F2.policies.time.type = TimeBasedTriggeringPolicy
+appender.F2.policies.startup.type = OnStartupTriggeringPolicy
+appender.F2.policies.size.type = SizeBasedTriggeringPolicy
+appender.F2.policies.size.size = 100MB
+appender.F2.policies.time.interval = 1
+appender.F2.policies.time.modulate = true
+appender.F2.strategy.type = DefaultRolloverStrategy
+appender.F2.strategy.delete.type = Delete
+appender.F2.strategy.delete.basePath = ${basePath}
+appender.F2.strategy.delete.maxDepth = 1
+appender.F2.strategy.delete.ifLastModified.type = IfLastModified
+# Delete files older than 180 days
+appender.F2.strategy.delete.ifLastModified.age = 180d
+# Classes in this package or sub packages will use ConsoleAppender and RollingFileAppender for logging
+
+# list of all loggers
+loggers = process, service, dao, hibernate, sinopac, FixedWidthUtil, hibernateSql, hibernateType
+
+logger.dao.name =  com.hitrust.fedi.dao
+logger.dao.level = INFO
+
+logger.service.name =  com.hitrust.fedi.service
+logger.service.level = INFO
+
+logger.process.name =  com.hitrust.fedi.process
+logger.process.level = INFO
+
+logger.sinopac.name =  com.hitrust.fedi.sinopac
+logger.sinopac.level = DEBUG
+
+logger.FixedWidthUtil.name =  com.hitrust.fedi.common.util.FixedWidthUtil
+logger.FixedWidthUtil.level = TRACE
+
+logger.hibernate.name = org.hibernate
+logger.hibernate.level = ERROR
+logger.hibernate.additivity = false
+
+#\u5370\u51fa SQL
+logger.hibernateSql.name = org.hibernate.SQL
+logger.hibernateSql.level = DEBUG
+logger.hibernateSql.additivity = false
+
+#\u5370\u51fa SQL \u53c3\u6578\u503c\u53ca\u50b3\u56de\u6b04\u4f4d\u503c \uff08\u82e5 log \u6a94\u6848\u904e\u5927\u53ef\u95dc\u9589\u6b64\u8a2d\u5b9a\uff0c\u5728\u6700\u524d\u9762\u52a0\u4e0a #\uff09
+logger.hibernateType.name = org.hibernate.type.descriptor.sql.BasicBinder
+logger.hibernateType.level = TRACE
+logger.hibernateType.additivity = false
+
+
+rootLogger.level = INFO
+rootLogger.additivity = false
+rootLogger.appenderRef.F1.ref = F1
+rootLogger.appenderRef.F2.ref = F2
+rootLogger.appenderRef.stdout.ref = stdout
+

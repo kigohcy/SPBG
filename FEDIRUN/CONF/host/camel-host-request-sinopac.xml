@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<camel:camelContext id="camelHostReq"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+
+		<camel:threadPoolProfile
+			id="hostReqThreadPool" defaultProfile="true" poolSize="8"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxPoolSize="32"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			allowCoreThreadTimeOut="false" rejectedPolicy="Abort" />
+		<camel:route id="camelHostReq-process">
+			<!-- 1. 每 10 秒 timer 自動掃描 TXN_DETAIL -->
+			<!-- <camel:from uri="quartz2://hostRequest?cron=0/10+*+*+1/1+*+?+*" /> -->
+
+			<!-- 1. 從非同步佇列中接收 EDI 字串 -->
+			<camel:from
+				uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=8&amp;maxConcurrentConsumers=32" />
+			<camel:onException>
+				<camel:exception>
+					com.hitrust.fedi.service.host.DelayedTreatmentFEDIException
+				</camel:exception>
+				<camel:to
+					uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=8" />
+				<camel:log loggingLevel="INFO"
+					message="Postpone transaction." />
+			</camel:onException>
+			<camel:onException>
+				<camel:exception>
+					org.springframework.dao.DeadlockLoserDataAccessException
+				</camel:exception>
+				<camel:to
+					uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=8" />
+				<camel:log loggingLevel="INFO"
+					message="Data Busy (DeadlockLoserDataAccessException), will retry later!" />
+			</camel:onException>
+			<camel:onException>
+				<camel:exception>
+					org.hibernate.exception.LockAcquisitionException
+				</camel:exception>
+				<camel:to
+					uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=2&amp;maxConcurrentConsumers=8" />
+				<camel:log loggingLevel="INFO"
+					message="Data Busy (LockAcquisitionException), will retry later!" />
+			</camel:onException>
+			<!-- 2. 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+			<camel:multicast
+				executorServiceRef="hostReqThreadPool" parallelProcessing="true">
+
+				<!-- <camel:to uri="bean:throwRuntimeExceptionProcess?method=process" 
+					/> -->
+				<!-- 將全部的批次包含在同一個通道中 -->
+				<camel:pipeline>
+					<!-- 4. 從 Queue 抓取 '1-020100', '1-000160', '1-000180', '1-110171' 交易明細之 
+						ID -->
+					<camel:setHeader headerName="detailUnitId">
+						<camel:simple>${header['HOST_R_detailUnitId']}</camel:simple>
+					</camel:setHeader>
+					<camel:setHeader headerName="DetailUnitId">
+						<camel:simple>${header['detailUnitId']}</camel:simple>
+					</camel:setHeader>
+					<camel:choice>
+						<camel:when>
+							<camel:simple>${header['detailUnitId']} != null
+							</camel:simple>
+
+							<camel:log loggingLevel="INFO"
+								message="Processing detailUnitId = ${header['detailUnitId']}" />
+
+							<!-- 3 設定 Message Header 初始資料 -->
+
+							<!-- 如果PARAMETER.RMT_WORKTIME_START沒有定義，則預設 '08:00'。 -->
+							<camel:setHeader headerName="RMT_WORKTIME_START">
+								<camel:constant>0800</camel:constant>
+							</camel:setHeader>
+
+							<!-- RMT轉通匯營業時間範圍檢核，於營業日的營業時間內將轉通匯交易的帳務資料送給帳務主機處理。 -->
+							<!-- 如果PARAMETER.RMT_WORKTIME_END沒有定義，則預設 '15:30'。 -->
+							<camel:setHeader headerName="RMT_WORKTIME_END">
+								<camel:constant>1530</camel:constant>
+							</camel:setHeader>
+
+							<!-- 載入參數表 -->
+							<camel:to
+								uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+							<!-- 今日=系統日期 -->
+							<camel:setHeader headerName="today">
+								<camel:simple>${date:now:yyyyMMdd}</camel:simple>
+							</camel:setHeader>
+
+							<!-- 今日=系統日期 -->
+							<camel:setHeader headerName="todayTime">
+								<camel:simple>${date:now:HHmmss}</camel:simple>
+							</camel:setHeader>
+
+							<!-- 處理日期時間=系統日期時間 -->
+							<camel:setHeader headerName="processDateTime">
+								<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+							</camel:setHeader>
+
+
+							<!-- 5 查詢待處理的交易 -->
+							<camel:choice>
+								<camel:when>
+									<camel:simple>${header['EDI_Internal_Trade_24H']} == 'ON'
+									</camel:simple>
+									<camel:log loggingLevel="TRACE"
+										message="host.req.sql.all.24hr-sql:{{host.req.sql.all.24hr}}" />
+									<camel:to uri="sql:{{host.req.sql.all.24hr}}" />
+								</camel:when>
+								<camel:otherwise>
+									<camel:log loggingLevel="TRACE"
+										message="host.req.sql.all.non24hr-sql:{{host.req.sql.all.non24hr}}" />
+									<camel:to uri="sql:{{host.req.sql.all.non24hr}}" />
+								</camel:otherwise>
+							</camel:choice>
+
+							<camel:split>
+								<camel:simple>${body}</camel:simple>
+								<camel:pipeline>
+									<!-- 6. 修改交易明細狀態為處理中 -->
+									<camel:to
+										uri="bean:hostReqUpdateTxnDetailProcessingProcess?method=process" />
+									<!-- 7. 檢核 DataKind 1-% 之交易明細 -->
+									<camel:to
+										uri="bean:sinopacVerifyHostRequestProcess?method=process" />
+									<camel:log loggingLevel="INFO"
+										message="_HOST_REQUEST_GEN_FILE_TYPE = ${header['_HOST_REQUEST_GEN_FILE_TYPE']}" />
+									<camel:choice>
+										<camel:when>
+											<camel:simple>${header['_HOST_REQUEST_GEN_FILE_TYPE']} ==
+												'-1.DAT'
+											</camel:simple>
+											<camel:to uri="direct:generate-1-DAT" />
+										</camel:when>
+										<camel:when>
+											<camel:simple>${header['_HOST_REQUEST_GEN_FILE_TYPE']} ==
+												'-2.DAT'
+											</camel:simple>
+											<camel:to uri="direct:generate-2-DAT" />
+										</camel:when>
+									</camel:choice>
+								</camel:pipeline>
+							</camel:split>
+						</camel:when>
+						<camel:otherwise>
+							<camel:log loggingLevel="ERROR"
+								message="Invalid detailUnitId = ${header['detailUnitId']}" />
+						</camel:otherwise>
+					</camel:choice>
+
+				</camel:pipeline>
+			</camel:multicast>
+		</camel:route>
+
+		<!-- 產生 FEDI付款/退款轉帳通知訊息 -->
+		<camel:route id="generate-1-DAT">
+			<camel:from uri="direct:generate-1-DAT" />
+			<camel:to
+				uri="bean:hostReqUpdateTxnDetailProcess?method=process" />
+			<camel:to uri="bean:hostReqGetDatNameProcess?method=process" />
+			<!-- 處理日期時間=系統日期時間 -->
+			<camel:setHeader headerName="processDateTime">
+				<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+			</camel:setHeader>
+			<camel:setHeader headerName="newFileName">
+				<camel:simple>${header['processDateTime']}-${header['tmPCODE']}-${header['tmVabId']}-${header['tmStan']}-1.DAT
+				</camel:simple>
+			</camel:setHeader>
+			<camel:setHeader headerName="ENABLE_GET_ENTITIES">
+				<camel:constant>true</camel:constant>
+			</camel:setHeader>
+			<camel:log loggingLevel="INFO"
+				message="Generating -1.DAT headers for detailUnitId =${header['detailUnitId']}, stan=${header['tmStan']}, tmVabId=${header['tmVabId']}, processDateTime=${header['processDateTime']}" />
+			<camel:to
+				uri="bean:generateHostRequestMessageProcess?method=process" />
+
+			<camel:to
+				uri="jms:FEDI2HOST_Q?jmsMessageType=object&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=32" />
+			<camel:to
+				uri="bean:updateTxnDetailFileContentProcStatusProcess?method=process" />
+		</camel:route>
+
+		<!-- 產生 FEDI付款/退款轉帳結果訊息 -->
+		<camel:route id="generate-2-DAT">
+			<camel:from uri="direct:generate-2-DAT" />
+			<camel:to
+				uri="bean:hostReqUpdateTxnDetailProcess?method=process" />
+			<camel:to uri="bean:hostReqGetDatNameProcess?method=process" />
+			<!-- 處理日期時間=系統日期時間 -->
+			<camel:setHeader headerName="processDateTime">
+				<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+			</camel:setHeader>
+			<camel:log loggingLevel="ERROR"
+				message="Generating -2.DAT headers for stan=${header['tmStan']}, tmVabId=${header['tmVabId']}, processDateTime=${header['processDateTime']}" />
+			<camel:to
+				uri="bean:generateHostResponseMessageProcess?method=process" />
+			<camel:to
+				uri="jms:HOST_RESPONSE?jmsMessageType=text&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=4" />
+			<camel:setHeader headerName="ProcStatus">
+				<camel:constant>3</camel:constant>
+			</camel:setHeader>
+			<camel:to
+				uri="bean:updateTxnDetailFileContentProcStatusProcess?method=process" />
+		</camel:route>
+
+
+	</camel:camelContext>
+</beans>
+

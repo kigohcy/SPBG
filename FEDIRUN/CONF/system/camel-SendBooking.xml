@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camelContext messageHistory="false" trace="false" id="camelSendAdvance"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- <route id="processSendAdvance-route0">
+			<from uri="sql:{{select_processUpdDetail_1}}" />
+			<from uri="quartz2://processUpdDetail_1?cron=0/10+*+*+1/1+*+?+*" />
+			<onException>
+				<exception>org.springframework.dao.DeadlockLoserDataAccessException</exception>
+				<redeliveryPolicy maximumRedeliveries="10"
+					redeliveryDelay="1000" />
+			</onException>
+			<multicast >
+			   <to	uri="controlbus:route?routeId=processSendAdvance-route1&amp;action=start" />
+			   <to	uri="controlbus:route?routeId=processSendAdvance-route2&amp;action=start" />
+			</multicast>
+		</route> -->
+		<route id="camelSendAdvance-process1" >
+			<from uri="sql:{{select_for_advance}}{{consumer_onConsume}}{{update_TXNDETAIL_ProcStatus2}}" />
+		  
+		    <camel:setHeader headerName="HOST_R_detailUnitId">
+				<camel:simple>${body[DetailUnitId]}</camel:simple>
+		   </camel:setHeader>
+		    <log message="detailUnitId=${headers.HOST_R_detailUnitId}" />
+		    <multicast>
+		     <to uri="jms:HOST_REQUEST" />
+		    </multicast>
+		</route>
+		<route id="camelSendAdvance-process2" >
+			<from
+				uri="sql:{{select_for_advance2}}{{consumer_onConsume}}{{update_TXNDETAIL_ProcStatus1}}" />
+			<!-- <log message="${body}"/> -->
+			<!--  <to uri="jms:HOST_REQUEST" /> -->
+			 <to uri="mock:other" />
+		</route>
+	</camelContext>
+
+</beans>

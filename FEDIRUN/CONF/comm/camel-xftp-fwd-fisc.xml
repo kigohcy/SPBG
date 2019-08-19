@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelXftpFwdFisc"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="camelXftpFwdFisc-process">
+			<!-- 1. 每 1 秒自動掃描目錄 -->
+			<camel:from
+				uri="file:/FEDIRUN/COMM/FISC/EDI2FISC?readLock=idempotentRepository&amp;delay=5000&amp;move=BACKUP" />
+			<camel:onException>
+				<camel:exception>
+					com.hitrust.fedi.xftp.XFtpNoRetryException
+				</camel:exception>
+				<camel:to uri="bean:errlogProcess?method=process" />
+				<camel:to uri="file:/FEDIRUN/COMM/FISC/EDI2FISC_FAIL" />
+			</camel:onException>
+			<camel:pipeline>
+				<camel:setHeader headerName="SLOGID">
+					<camel:simple>${file:name}</camel:simple>
+				</camel:setHeader>
+
+				<!-- 處理日期時間=系統日期時間 -->
+				<camel:setHeader headerName="processDateTime">
+					<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_PARAMETER_NAME">
+					<camel:constant>XFTP_ACTIVE</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_ACTIVE_VALUE">
+					<camel:constant>Y</camel:constant>
+				</camel:setHeader>
+				<camel:setHeader headerName="STOP_ROUTE_ID">
+					<camel:constant>xftpFwdFiscRoute</camel:constant>
+				</camel:setHeader>
+
+				<!-- 載入參數表 -->
+				<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+
+				<!-- 檢查是否要關閉此 CamelRoute -->
+				<camel:to uri="bean:stopRouteIfInactiveProcess?method=process" />
+				<!-- 檢查是否啟用 XFTP 功能 -->
+				<camel:choice>
+					<camel:when>
+						<camel:simple>${header['XFTP_ACTIVE']} == 'Y'</camel:simple>
+						<!-- 處理日期時間=系統日期時間 -->
+						<camel:setHeader headerName="processDateTime">
+							<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+						</camel:setHeader>
+						<!-- 從 DB 取出 Forward 次數 -->
+						<camel:to uri="bean:getForwardCountProcess?method=process" />
+						<camel:log loggingLevel="INFO" message="處理檔案 ${header['SLOGID']}" />
+
+						<!-- 檢查檔案處理次數是否超過限制 -->
+						<camel:log loggingLevel="INFO"
+							message="FORWARD_COUNT=${header['FORWARD_COUNT']}" />
+						<camel:log loggingLevel="INFO"
+							message="FWD_FISC_MAX_SIZE=${header['FWD_FISC_MAX_SIZE']}" />
+						<camel:choice>
+							<camel:when>
+								<camel:simple>${header['FORWARD_COUNT']} >=
+									${header['FWD_FISC_MAX_SIZE']}
+								</camel:simple>
+								<camel:to uri="file:/FEDIRUN/COMM/FISC/EDI2FISC_FAIL" />
+							</camel:when>
+							<camel:otherwise>
+								<camel:to
+									uri="bean:forwardFiscUpdateInterchangeProcess?method=process" />
+								<camel:choice>
+									<camel:when>
+										<camel:simple>${header['XFtpNoRetryException']} == 'TRUE'
+										</camel:simple>
+										<camel:log loggingLevel="INFO" message="移動檔案到失敗區: ${header['SLOGID']}" />
+										<camel:to uri="file:/FEDIRUN/COMM/FISC/EDI2FISC_FAIL" />
+									</camel:when>
+									<camel:otherwise>
+										<camel:log loggingLevel="INFO" message="移動檔案到成功區: ${header['SLOGID']}" />
+										<camel:to uri="file:/FEDIRUN/COMM/FISC/EDI2FISC_OK" />
+										<camel:to
+											uri="bean:recordCountForFileHandlerProcess?method=registerSucceed" />
+									</camel:otherwise>
+								</camel:choice>
+							</camel:otherwise>
+						</camel:choice>
+					</camel:when>
+				</camel:choice>
+			</camel:pipeline>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

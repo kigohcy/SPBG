@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:camel="http://camel.apache.org/schema/spring"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+  
+  <!-- <from uri="sql:select SendId,SendQual from TxnAUTACK WHERE ProcStatus='1' AND HashType='48' GROUP BY SendId, SendQual"/> 
+    <to uri="sql:select AutackUnitId,SendId,SendQual,SecStatus,IctlNo,MsgRefNo,PreSec1,PreSec2 from TxnAUTACK WHERE SendId=:#SendId AND SendQual=:#SendQual AND ProcStatus='1' AND HashType='48'?consumer.onConsume=update TxnAUTACK set ProcStatus='2' WHERE AutackUnitId=:#AutackUnitId"/> --><!--  <from uri="sql:select AutackUnitId,SendId,SendQual,SecStatus,IctlNo,MsgRefNo,PreSec1,PreSec2 from TxnAUTACK WHERE ProcStatus='2' AND HashType='48'"/> -->
+    <camelContext messageHistory="false" trace="false" id="camel130100_O" xmlns="http://camel.apache.org/schema/spring">
+  <threadPoolProfile defaultProfile="false"
+			poolSize="8" maxPoolSize="20"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true" id="130100OutThreadPool" />
+  <route id="camel130100_O-process2">
+    <from uri="sql:{{select_130100_O_MyNet_body}}"/>
+    <log message="${body}"/>
+    <to uri="bean:loadParametersIntoHeaderProcess?method=process"/>
+    <split>
+      <simple>${body}</simple>
+      <multicast executorServiceRef="130100OutThreadPool" parallelProcessing="true">
+        <pipeline>
+          <to uri="bean:autAck130100Out?method=process"/>
+          <choice>
+            <when>
+              <simple>${headers.P130100O_OK} == 'Y'</simple>
+              <log message="${body}"/>
+              <!-- <choice>
+                <when>
+                  <simple>${headers.EOI_OR_NODE} == 'EOI'</simple>
+                  <to uri="file:/FEDIRUN/COMM/EOI/EDI2EOI?fileName=${header['RLOGID']}-${header['InchgUnitId']}"/>
+                </when>
+                <when>
+                  <simple>${headers.EOI_OR_NODE} == 'FISC'</simple>
+                  <to uri="file:/FEDIRUN/COMM/FISC/EDI2FISC?fileName=${header['RLOGID']}-${header['InchgUnitId']}"/>
+                </when>
+                <otherwise>
+                  <to uri="file:/FEDIRUN/COMM/FISC/NODE2FISC?fileName=${header['RLOGID']}-${header['InchgUnitId']}"/>
+                </otherwise>
+              </choice>  -->
+                               <setHeader headerName="INCHG_RLOGID">
+          							<simple>${header['RLOGID']}</simple>
+        						</setHeader>
+             <!-- 將 Body 中的 Camel 檔案物件變成 EDI 字串 -->
+								<convertBodyTo type="java.lang.String" />
+								<!-- 將 Body 中的 EDI 字串放到 Header 中 -->
+								<to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+								<!-- 送到非同步佇列中 -->
+								<to	uri="jms:EDIHUB_OUT_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=32" />
+            </when>
+            <otherwise>
+              <to uri="mock:stop"/>
+            </otherwise>
+          </choice>
+        </pipeline>
+      </multicast>
+    </split>
+  </route>
+  <route id="camel130100_O-process1">
+    <from uri="sql:{{select_130100_O_MyNet}}"/>
+    <log message="${body}"/>
+  </route>
+  
+  <route id="camel130100_O-process3">
+    <from uri="sql:{{select_130100_O_OhterNet}}"/>
+    <!-- <setHeader headerName="nowTime">
+      <simple>${date:now:yyyyMMddHHmmss}</simple>
+    </setHeader>
+    <setHeader headerName="nowTimelong">
+      <simple>${date:now:yyyyMMddHHmmssSSS}</simple>
+    </setHeader> -->
+    <to uri="sql:{{update_130100_O_OtherNet_TXNDETAIL_ProcStatus2}}"/>
+    
+    <to uri="sql:{{select_130100_O_OhterNet_body}}"/>
+    <log message="${body}"/>
+    <convertBodyTo type="java.lang.String"/>
+    
+    <setHeader headerName="InchgUnitId">
+       <groovy>request.body.substring(request.body.length()-16,  request.body.length()-2)</groovy>
+    </setHeader>
+    <transform>
+      <groovy>request.body.substring(3, request.body.length()-30)</groovy>
+    </transform>
+    <log message="InchgUnitId=${headers.InchgUnitId}"/>
+    <doTry>
+          <setHeader headerName="RLOGID_appType">
+    		<constant>XRID</constant>
+	  	 </setHeader>
+								<!-- 產生 14 碼 RLOGID 存入 Message Header (INCHG_RLOGID) -->
+								<to uri="bean:genRLogIdProcess?method=process" />   
+								<!-- 將 Body 中的 EDI 字串放到 Header 中 -->
+								<to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+								<!-- 送到非同步佇列中 -->
+								<to	uri="jms:EDIHUB_OUT_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=32" />
+           <to uri="sql:{{update_130100_O_OtherNet_TXNDETAIL_ProcStatus3}}"/>
+      <doCatch>
+        <exception>
+					java.lang.Throwable
+				</exception>
+        <to uri="sql:{{update_130100_O_OtherNet_TXNDETAIL_ProcStatus4}}"/>
+      </doCatch>
+    </doTry>
+  </route>
+</camelContext>
+
+</beans>

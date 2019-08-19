@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.1.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.1.xsd
+       	http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.1.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<import resource="classpath*:/spring.xml" />
+
+	<context:component-scan base-package="com.hitrust.fedi.xftp.process" />
+	<context:component-scan base-package="com.hitrust.fedi.facade" />
+	<context:component-scan base-package="com.hitrust.fedi.abnormal" />
+	<context:component-scan base-package="com.hitrust.fedi.sinopac" />
+	
+	<bean id="shutdown" class="org.apache.camel.impl.DefaultShutdownStrategy">
+		<property name="timeout" value="2" />
+	</bean>
+
+	<bean id="bridgePropertyPlaceholder"
+		class="org.apache.camel.spring.spi.BridgePropertyPlaceholderConfigurer">
+		<!-- <property name="parser" ref="jasypt" /> -->
+		<property name="locations">
+			<list>
+				<!-- Common SQL -->
+				<value>classpath:camel.properties</value>
+				<!-- Common SQL -->
+				<value>classpath:sql.properties</value>
+				<!-- Host-Request, Host-Response -->
+				<value>classpath:host.properties</value>
+				<!-- Mapper -->
+				<value>classpath:mapper.properties</value>
+				<!-- Packer -->
+				<value>classpath:pack.properties</value>
+			</list>
+		</property>
+	</bean>
+	
+	<bean id="jmsConnectionFactory" class="org.apache.activemq.ActiveMQConnectionFactory">
+		<constructor-arg index="0" value="${jms.broker.url}" />
+		<property name="trustedPackages">
+			<list>
+				<value>java</value>
+				<value>javax</value>
+				<value>org.apache.activemq</value>
+				<value>com.thoughtworks.xstream</value>
+				<value>com.hitrust</value>
+			</list>
+		</property>
+		<property name="userName" value="${jms.broker.user}" />
+		<property name="password" value="${jms.broker.mema}" />
+	</bean>
+
+	<bean id="pooledConnectionFactory" class="org.apache.activemq.pool.PooledConnectionFactory"
+		init-method="start" destroy-method="stop">
+		<property name="maxConnections" value="250" />
+		<property name="connectionFactory" ref="jmsConnectionFactory" />
+	</bean>
+
+
+
+	<bean id="jmsConfig" class="org.apache.camel.component.jms.JmsConfiguration">
+		<property name="connectionFactory" ref="pooledConnectionFactory" />
+		<property name="concurrentConsumers" value="100" />
+	</bean>			
+					
+	<camel:camelContext id="cameLoadParameters"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:route id="cameLoadParameters-process">
+			<!-- 每五分鐘更新參數表 0/5+*+*+1/1+*+?+* -->
+			<camel:from uri="quartz2://loadParameters?cron=0+0/30+*+1/1+*+?+*" />
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=loadFromDatabase" />
+		</camel:route>
+	</camel:camelContext>
+
+	<import resource="classpath*:/comm/camel-*.xml" />
+	<import resource="classpath*:/edihub/camel-*.xml" />
+	<import resource="classpath*:/mapper/camel-*.xml" />
+	<import resource="classpath*:/host/camel-*.xml" />
+	<import resource="classpath*:/system/camel-*.xml" />
+	
+	<!-- 
+	<import resource="classpath*:/test/camel-*.xml" />
+
+	
+	-->
+</beans>
+

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<camel:camelContext messageHistory="true" 
+		id="camelEdihubOutFile"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+
+		<camel:route id="camelEdihubOut-process-file">
+			<camel:from
+				uri="file:/FEDIRUN/EDIHUB/OUT??readLock=idempotentRepository&amp;initialDelay=400&amp;delay=200&amp;move=BACKUP&amp;charset=MS950" />
+			<camel:onException>
+				<camel:exception> java.lang.Throwable </camel:exception>
+				<camel:log loggingLevel="INFO"
+					message="Retrying file: ${header['CamelFileAbsolutePath']}" />
+			</camel:onException>
+			<camel:setHeader headerName="CURRENT_PATH">
+				<camel:constant>/FEDIRUN/EDIHUB/OUT/</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="FAIL_PATH">
+				<camel:constant>/FEDIRUN/EDIHUB/OUT_FAIL/</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="charset">
+				<camel:simple>MS950</camel:simple>
+			</camel:setHeader>
+			
+			<camel:log loggingLevel="INFO" message="CamelFileName=${header['CamelFileName']}" />			
+			
+			<!--<camel:setHeader headerName="INCHG_RLOGID">
+				<camel:simple>${header['CamelFileName']}</camel:simple>
+			</camel:setHeader>		-->
+			<camel:setHeader headerName="RLOGID_appType">
+				<camel:constant>ARID</camel:constant>
+			</camel:setHeader>
+
+			<!-- 產生 14 碼 RLOGID 存入 Message Header (INCHG_RLOGID) -->
+			<camel:to uri="bean:genRLogIdProcess?method=process" />
+					
+			<camel:log loggingLevel="INFO" message="INCHG_RLOGID=${header['INCHG_RLOGID']}" />			
+
+			<camel:to uri="bean:bodyIntoStringBodyProcess?method=process" />
+			<camel:to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+			<camel:to
+				uri="jms:EDIHUB_OUT_Q?allowNullBody=false&amp;jmsMessageType=text" />
+		</camel:route>
+
+	</camel:camelContext>
+</beans>

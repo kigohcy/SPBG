@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+    <camelContext messageHistory="false" trace="false" id="camelCONTRL_O" xmlns="http://camel.apache.org/schema/spring">
+  <!-- <propertyPlaceholder location="classpath:CONTRLO.properties" id="placeholder"/> -->
+  <!-- <threadPoolProfile defaultProfile="false" poolSize="{{common.in.thread.pool.poolSize}}" maxPoolSize="{{common.in.thread.pool.maxPoolSize}}" keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort" customId="true" id="CONTRLOutThreadPoolProfile"/> -->
+  <route id="camelCONTRL_O-process">
+    <from uri="sql:{{select_Contorl_O}}"/>
+    <setHeader headerName="nowTime">
+      <simple>${date:now:yyyyMMddHHmmss}</simple>
+    </setHeader>
+    <to uri="sql:{{update_TXNCONTRL_ProcStatus2}}"/>
+    <to uri="bean:loadParametersIntoHeaderProcess?method=process"/>
+    <to uri="sql:{{select_Contorl_O_body}}"/>
+    <choice>
+      <when>
+        <simple>${in.body} != null</simple>
+        <log message="${body}"/>
+        <split>
+          <simple>${body}</simple>
+          <multicast parallelProcessing="true">
+            <pipeline>
+              <to uri="bean:genConTrlOut?method=process"/>
+
+              <choice>
+                <when>
+                  <simple>${headers.PCONTRLO_OK} == 'Y'</simple>
+                  <log message="${body}"/>
+                      <!-- 將 Body 中的 Camel 檔案物件變成 EDI 字串 -->
+                                <setHeader headerName="INCHG_RLOGID">
+          							<simple>${header['RLOGID']}</simple>
+        						</setHeader>
+								<convertBodyTo type="java.lang.String" />
+								<!-- 將 Body 中的 EDI 字串放到 Header 中 -->
+								<to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+								<!-- 送到非同步佇列中 -->
+								<to	uri="jms:EDIHUB_OUT_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=32" />
+                                <to uri="sql:{{update_TXNCONTRL_ProcStatus3}}"/>
+   	  				  <to uri="bean:loadParametersIntoHeaderProcess?method=process"/>
+          		      <setHeader headerName="subject">
+						<simple>${header['ADM_MAIL_SND_CONTRL_SUB']}</simple>
+					  </setHeader>   	  				  
+                      <to uri="bean:controlNoticeProcess?method=process" />
+                      
+                </when> 
+                <otherwise>
+                  <to uri="sql:{{update_TXNCONTRL_ProcStatus4}}"/>
+                </otherwise>
+              </choice>
+            </pipeline>
+          </multicast>
+        </split>
+      </when>
+      <otherwise>
+        <to uri="sql:update TXNCONTRL set ProcStatus='3' ,ProcDate=:#nowTime from TXNCONTRL T LEFT JOIN MSGDATA M ON T.InchgUnitId =M.InchgUnitId AND M.InchgUnitId IS NULL AND T.ProcStatus !='3'"/>
+      </otherwise>
+    </choice>
+  </route>
+  <route id="processCONTRLO-route1">
+    <from uri="sql:{{select_Control_O_mailbody}}"/>
+    <log message="${body}"/>
+    <setHeader headerName="nowTime">
+      <simple>${date:now:yyyyMMddHHmmss}</simple>
+    </setHeader>
+    <setBody>
+        <simple trim="false">${body} 收到的EDI檔案無法判別寄件人.</simple>
+    </setBody>
+ 	<to uri="bean:loadParametersIntoHeaderProcess?method=process"/>
+    <setHeader headerName="subject">
+	   <simple>${header['ADM_MAIL_SND_CONTRL_SUB']}</simple>
+    </setHeader>   	  				  
+    
+     <to uri="bean:controlNoticeProcess?method=process" />
+  </route>
+</camelContext>
+
+</beans>

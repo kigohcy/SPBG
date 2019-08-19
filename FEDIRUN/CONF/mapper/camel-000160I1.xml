@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<!-- 4. Send Control --><!-- 5.Get Global Variable -->
+	<!-- use Camel property placeholder loaded from the given file --><!-- 1.掃MSGDATA --><!-- 2.Update MSGDATA Set ProcStatus=2 --><!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt --><!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+	<camelContext messageHistory="false" trace="false" id="camel000160_I1"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- <propertyPlaceholder location="classpath:000160I.properties" id="placeholder"/> -->
+		<threadPoolProfile defaultProfile="false"
+			poolSize="8" maxPoolSize="24"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true" id="000160InThreadPool" />
+		<route id="camel000160_I1-process">
+			<!-- 1.掃MSGDATA -->
+			<from
+				uri="sql:{{select_000160_I}}{{consumer_onConsume}}{{update_MSGDATA_ProcStatus2}}" />
+				<!-- <to uri="mock:other" /> -->
+				<to uri="jms:000160IQ" />
+		</route>
+		<route id="camel000160_I1-process0">
+			<from
+				uri="sql:{{select_000160_I2}}{{consumer_onConsume}}{{update_MSGDATA_ProcStatus2}}" />
+			<!-- <log message="${body}"/> -->
+			<to uri="jms:000160IQ" />
+		</route>
+		<route id="camel000160_I1-process1">
+			<!-- <from uri="sql:{{select_000160_I2}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader> -->
+			<from uri="jms:000160IQ?concurrentConsumers=8&amp;maxConcurrentConsumers=16" />
+			<!-- 2.Update MSGDATA Set ProcStatus=2 -->
+			<!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt -->
+			<to uri="sql:{{update_INCHG_TakeCntPlus1A}}" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<to uri="sql:{{select_IN_body}}" />
+			<log message="${body}" />
+			<split>
+				<simple>${body}</simple>
+				<multicast  parallelProcessing="true" executorServiceRef="000160InThreadPool">
+					<pipeline>
+						<to uri="bean:finPay160In?method=process" />
+
+						<choice>
+							<when>
+								<simple>${headers.P000160I_OK} == 'Y'</simple>
+								<multicast >
+								 <to uri="sql:{{update_MSGDATA_ProcStatus3}}" />
+								 <to uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=8&amp;maxConcurrentConsumers=16" />
+								</multicast>
+							</when>
+							<otherwise>
+								<to uri="sql:{{update_MSGDATA_ProcStatus4}}" />
+							</otherwise>
+						</choice>
+					</pipeline>
+				</multicast>
+			</split>
+		</route>
+	</camelContext>
+
+</beans>

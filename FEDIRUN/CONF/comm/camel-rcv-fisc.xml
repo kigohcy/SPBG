@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelRcvFisc"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<camel:threadPoolProfile id="rcvfiscThreadPool"
+			defaultProfile="true" poolSize="2" 
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxPoolSize="24"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			allowCoreThreadTimeOut="false" rejectedPolicy="Abort" />
+		<camel:route id="camelRcvFisc-process">
+			<!-- 1. 每 1 秒自動掃描目錄 -->
+			<camel:from
+				uri="file:/FEDIRUN/COMM/FISC/FISC2EDI?readLock=idempotentRepository&amp;initialDelay=400&amp;delay=100&amp;move=BACKUP" />
+			<!-- 1.1 啟動例外處理，紀錄錯誤到 ERRORLOG -->
+			<camel:onException>
+				<camel:exception>
+					java.lang.Throwable
+				</camel:exception>
+				<camel:to uri="file:/FEDIRUN/COMM/FISC/FISC2EDI_FAIL?fileName=${header['CamelFileName']}&amp;charset=MS950" />
+				<camel:to uri="bean:errlogProcess?method=process" />
+				
+			</camel:onException>
+			
+			<camel:log loggingLevel="INFO" message="處理檔案 ${file:name}" />
+			<!-- 1.2 設定 Message Header 初始資料 -->
+			<!-- 今日=系統日期 -->
+			<!-- 載入參數表 -->
+			<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<camel:setHeader headerName="today">
+				<camel:simple>${date:now:yyMMdd}</camel:simple>
+			</camel:setHeader>
+			<camel:setHeader headerName="RLOGID_appType">
+				<camel:constant>ARID</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="CURRENT_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/FISC2EDI/</camel:constant>
+			</camel:setHeader>
+			<camel:setHeader headerName="FAIL_PATH">
+				<camel:constant>/FEDIRUN/COMM/FISC/FISC2EDI_FAIL/</camel:constant>
+			</camel:setHeader>			
+			<camel:multicast executorServiceRef="rcvfiscThreadPool" parallelProcessing="true">
+				<camel:pipeline>
+					<!-- 產生 14 碼 RLOGID 存入 Message Header (INCHG_RLOGID) -->
+					<camel:to uri="bean:genRLogIdProcess?method=process" />
+					<camel:log loggingLevel="INFO"
+						message="INCHG_RLOGID=${header['INCHG_RLOGID']}" />
+					<camel:setHeader headerName="EDI_NAME">
+						<camel:simple>${header['INCHG_RLOGID']}-${file:name}</camel:simple>
+					</camel:setHeader>
+					<!-- 將 Body 中的 Camel 檔案物件變成 EDI 字串 -->
+					<camel:to uri="bean:bodyIntoStringBodyProcess?method=process" />
+
+					<!-- 將 Body 中的 EDI 字串放到 Header 中 -->
+					<camel:to uri="bean:placeBodyIntoHeaderProcess?method=process" />
+
+					<!-- 送到非同步佇列中 -->
+					<camel:to
+						uri="jms:EDIHUB_IN_Q?allowNullBody=false&amp;jmsMessageType=text&amp;concurrentConsumers=20&amp;maxConcurrentConsumers=40" />
+
+				</camel:pipeline>
+			</camel:multicast>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

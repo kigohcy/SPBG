@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<camel:camelContext id="camelAdmin"
+		xmlns:camel="http://camel.apache.org/schema/spring" trace="false">
+		<camel:route id="camelAdmin-queryRouteStatusRoute">
+			<camel:from
+				uri="jms:QUERY_CAMEL_ROUTE_STATUS_Q?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1" />
+			<camel:to uri="bean:queryCamelRouteStatusProcess?method=process" />
+		</camel:route>
+		<camel:route id="camelAdmin-startCamelRoute">
+			<camel:from
+				uri="jms:START_CAMEL_ROUTE_Q?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1" />
+			<camel:to uri="bean:startCamelRouteProcess?method=process" />
+		</camel:route>
+		<camel:route id="camelAdmin-stopCamelRoute">
+			<camel:from
+				uri="jms:STOP_CAMEL_ROUTE_Q?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1" />
+			<camel:to uri="bean:stopCamelRouteProcess?method=process" />
+		</camel:route>
+		<camel:route id="camelAdmin-suspendCamelRoute">
+			<camel:from
+				uri="jms:SUSPEND_CAMEL_ROUTE_Q?jmsMessageType=object&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=1" />
+			<camel:to uri="bean:suspendCamelRouteProcess?method=process" />
+		</camel:route>
+		<camel:route id="camelAdmin-reloadParametersRoute">
+			<camel:from
+				uri="jms:RELOAD_PARAMETERS?jmsMessageType=text&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=2" />
+			<camel:to
+				uri="bean:loadParametersIntoHeaderProcess?method=loadFromDatabase" />
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

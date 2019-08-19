@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camelContext messageHistory="false" trace="false" id="camelCONTRL_I" xmlns="http://camel.apache.org/schema/spring">
+ <!--  <propertyPlaceholder location="classpath:CONTRLI.properties" id="placeholder"/> -->
+ <!--  <threadPoolProfile defaultProfile="false" poolSize="{{common.in.thread.pool.poolSize}}" maxPoolSize="{{common.in.thread.pool.maxPoolSize}}" keepAliveTime="{{common.in.thread.pool.keepAliveTime}}" maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort" customId="true" id="CONTRLInThreadPoolProfile"/> -->
+  <route id="camelCONTRL_I-process">
+    <from uri="sql:{{select_Control_I}}"/>
+	<setHeader headerName="nowTime">
+		<simple>${date:now:yyyyMMddHHmmss}</simple>
+	</setHeader>
+
+	<!-- 2.Update MSGDATA Set ProcStatus=2 -->
+	<to uri="sql:{{update_MSGDATA_ProcStatus2}}" />
+	<!-- 3.Update INCHG Set FirstTakeDate,TakeDate,TakeCnt -->
+	<to uri="sql:{{update_INCHG_TakeCntPlus1}}" />
+	<to uri="sql:{{update_INCHG_FirstTakeDate}}" />
+	<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+	<to uri="sql:{{select_Convert_MSGDATA_OID_to_header}}" />
+	<to uri="sql:{{select_IN_body}}" />
+	<log message="${body}" />
+    <split>
+      <simple>${body}</simple>
+      <multicast parallelProcessing="true">
+        <pipeline>
+		 	<to uri="bean:loadParametersIntoHeaderProcess?method=process"/>
+		    <setHeader headerName="subject">
+			   <simple>${header['ADM_MAIL_RCV_CONTRL_SUB']}</simple>
+		    </setHeader>           
+          <to uri="bean:controlNoticeProcess?method=process" />
+          <to uri="sql:{{update_MSGDATA_ProcStatus3}}"/>
+        </pipeline>
+      </multicast>
+    </split>
+  </route>
+</camelContext>
+
+</beans>

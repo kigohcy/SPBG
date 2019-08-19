@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+
+
+
+	<!-- 用來新增人手接駁資料 --><!-- 把txnDetail改成M等待人手接駁放行 --><!-- 把已放行的人手接駁TxnDetail改成處理中 --><!-- 把已退件的人手接駁TxnDetail改成不處理 --><!-- 把已處理成功的TxnDetail的人手接駁改成成功 --><!-- 把已處理失敗的TxnDetail的人手接駁改成失敗 --><!-- 把已處理中的TxnDetail的人手接駁改成處理中 -->
+	<camelContext trace="false" id="camelManApproval_O"
+		xmlns="http://camel.apache.org/schema/spring">
+		<!-- <propertyPlaceholder location="classpath:ManApprovalI.properties" 
+			id="placeholder"/> -->
+		<threadPoolProfile defaultProfile="false"
+			poolSize="20" maxPoolSize="80"
+			keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}"
+			rejectedPolicy="Abort" customId="true"
+			id="ManApprovalOutThreadPoolProfile" />
+		<route id="camelManApproval_O-process1">
+			<from uri="sql:{{select_1dash020100_ProcStatus5}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<setHeader headerName="HOST_R_detailUnitId">
+				<simple>${body[DetailUnitId]}</simple>
+			</setHeader>
+			<log message="HOST_R_detailUnitId=${headers.HOST_R_detailUnitId}" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<to uri="sql:{{select_MAN_APPROVE_MODE_MAN_APPROVE_TIME_NOW}}" />
+			<log message="${headers.MAN_APPROVE_MODE}" />
+			<log message="${headers.MAN_APPROVE_TIME_NOW}" />
+			<choice>
+				<when>
+					<simple>${headers.MAN_APPROVE_MODE} == 'ON'</simple>
+					<choice>
+						<when>
+							<simple>${headers.MAN_APPROVE_TIME_NOW} == '0'</simple>
+							<to uri="sql:{{select_MAN_APPROVE_IN_APPV_REL}}" />
+							<choice>
+								<when>
+									<simple>${body[IN_APPV_REL]} == '0'</simple>
+									<pipeline>
+										<to uri="sql:{{update_MAN_APPROVE_TXNDETAIL_ProcStatus1}}" />
+										<to uri="direct:sentToHostRequest" />
+									</pipeline>
+								</when>
+								<otherwise>
+									<to uri="sql:{{insert_APPROVAL_new}}" />
+									<to uri="sql:{{update_MAN_APPROVE_TXNDETAIL_ProcStatusM}}" />
+									<log message="${body}" />
+								</otherwise>
+							</choice>
+						</when>
+						<otherwise>
+							<pipeline>
+								<to uri="sql:{{update_TXNDETAIL_ProcStatus1}}" />
+								<to uri="sql:{{update_APPROVAL_StatusP}}" />
+								<to uri="direct:sentToHostRequest" />
+							</pipeline>
+						</otherwise>
+					</choice>
+				</when>
+				<otherwise>
+					<pipeline>
+						<to uri="sql:{{update_TXNDETAIL_ProcStatus1}}" />
+						<to uri="sql:{{update_APPROVAL_StatusP}}" />
+						<to uri="direct:sentToHostRequest" />
+					</pipeline>
+				</otherwise>
+			</choice>
+		</route>
+		<route id="camelManApproval_O-process2">
+			<from uri="sql:{{select_APPROVAL_StatusP}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<multicast>
+				<pipeline>
+					<to uri="sql:{{update_1dash020100_ProcStatus1}}" />
+					<to uri="sql:{{select_1dach020100_forQueue}}" />
+					<to uri="direct:sentToHostRequest" />
+				</pipeline>
+			</multicast>
+		</route>
+		<route id="camelManApproval_O-process3">
+			<from uri="sql:{{select_APPROVAL_StatusB}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<to uri="sql:{{update_1dash020100_ProcStatus0}}" />
+		</route>
+		<route id="camelManApproval_O-process4">
+			<from uri="sql:{{select_1dash020100_ProcStatus3}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<to uri="sql:{{update_APPROVAL_StatusS}}" />
+		</route>
+		<route id="camelManApproval_O-process5">
+			<from uri="sql:{{select_1dash020100_ProcStatus4}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<to uri="sql:{{update_APPROVAL_StatusE}}" />
+		</route>
+		<route id="camelManApproval_O-process6">
+			<from uri="sql:{{select_1dash020100_ProcStatus2}}" />
+			<setHeader headerName="nowTime">
+				<simple>${date:now:yyyyMMddHHmmss}</simple>
+			</setHeader>
+			<to uri="sql:{{update_APPROVAL_StatusH}}" />
+		</route>
+		<route id="camelManApproval_sentToHostRequest">
+			<from uri="direct:sentToHostRequest" />
+			<choice>
+				<when>
+					<simple>${headers.HOST_R_detailUnitId} != null</simple>
+					<camel:log loggingLevel="INFO"
+						message="Sending HOST_R_detailUnitId to HostRequest: ${header['HOST_R_detailUnitId']}" />
+					<to
+						uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=16&amp;maxConcurrentConsumers=48" />
+					<camel:log loggingLevel="INFO"
+						message="Sent HOST_R_detailUnitId to HostRequest: ${header['HOST_R_detailUnitId']}" />
+				</when>
+			</choice>
+		</route>
+	</camelContext>
+
+</beans>

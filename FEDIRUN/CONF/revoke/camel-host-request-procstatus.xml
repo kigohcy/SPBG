@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+	<camel:camelContext id="camelHostReqProcstatus"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<!-- <camel:threadPoolProfile id="writeFileConentThreadPoolProfile"
+			defaultProfile="false" poolSize="{{writeFileConent.thread.pool.poolSize}}"
+			maxPoolSize="{{writeFileConent.thread.pool.maxPoolSize}}" keepAliveTime="{{common.in.thread.pool.keepAliveTime}}"
+			maxQueueSize="{{common.in.thread.pool.maxQueueSize}}" rejectedPolicy="Abort" /> -->
+		<camel:route id="camelHostReqProcstatus-process">
+
+			<!-- 查詢 1-* 未寫入外部檔案之交易明細 -->
+			<camel:from
+				uri="quartz2://hostRequestProcstatus?cron=0/10+*+*+1/1+*+?+*" />
+			<camel:onException>
+				<camel:exception>
+					org.springframework.dao.DeadlockLoserDataAccessException
+				</camel:exception>
+				<camel:log loggingLevel="INFO" message="Data Busy (DeadlockLoserDataAccessException), will retry later!" />
+			</camel:onException>
+			<camel:onException>
+				<camel:exception>
+					org.hibernate.exception.LockAcquisitionException
+				</camel:exception>
+				<camel:log loggingLevel="INFO" message="Data Busy (LockAcquisitionException) will retry later!" />
+			</camel:onException>
+			<!-- 處理日期時間=系統日期時間 -->
+			<camel:setHeader headerName="processDateTime">
+				<camel:simple>${date:now:yyyyMMddHHmmss}</camel:simple>
+			</camel:setHeader>
+			<camel:to
+				uri="sql:{{host.req.prostatus.select.ok.error}}?consumer.delay=10000" />
+			<!-- 將全部的批次包含在同一個通道中 -->
+			<camel:pipeline>
+				<!-- 每批處理交易明細數量 -->
+				<camel:setHeader headerName="NOT_EXIST_MESSAGE_FILE_CONTENT">
+					<camel:constant>-1.DAT 檔案找不到, 請人工介入處理</camel:constant>
+				</camel:setHeader>
+				<camel:split>
+					<camel:simple>${body}</camel:simple>
+					<!-- 將該批多重訊息交給多重傳播給執行緒儲存池，進行平行化處理 -->
+					<camel:multicast parallelProcessing="true">
+						<camel:to uri="bean:hostRequestProcstatusProcess?method=process" />
+					</camel:multicast>
+				</camel:split>
+			</camel:pipeline>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+
+	<camelContext trace="false" id="camelTradeDateRoute"
+		xmlns="http://camel.apache.org/schema/spring">
+		<route id="processTradeDateroute-0">
+			<!-- <from uri="direct:start" /> -->
+			<from uri="timer://runOnce?repeatCount=1&amp;delay=30000" />
+			<to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+			<choice>
+				<when>
+					<simple>${headers.UPD_TRADE_DATE} == 'ON'</simple>
+					<log loggingLevel="INFO"
+						message="UPD_TRADE_DATE: ${header['UPD_TRADE_DATE']}" />
+					<to
+						uri="controlbus:route?routeId=processTradeDateroute-1&amp;action=start" />
+				</when>
+				<otherwise>
+					<to uri="mock:other" />
+				</otherwise>
+			</choice>
+
+		</route>
+		<!-- <route id="processTradeDateroute-1" autoStartup="false">
+			<from uri="quartz2://processTradeDate_1?cron=*+4+8-16+?+*+MON-SAT" />
+			今日=系統日期
+			<setHeader headerName="today">
+				<simple>${date:now:yyyyMMdd}</simple>
+			</setHeader>
+			<to	uri="sql:{{update_Trada_date_auto}}" />
+		</route> -->
+		<route id="processTradeDateroute-1" autoStartup="false">
+			<from uri="quartz2://processTradeDate-1?cron=0+1,31+2-8,18-23+?+*+MON-SAT" />
+			<to uri="bean:sinopacTradeDateUpdate?method=process" />
+			<to	uri="jms:RELOAD_PARAMETERS?jmsMessageType=text" />
+		</route>
+	</camelContext>
+</beans>
+

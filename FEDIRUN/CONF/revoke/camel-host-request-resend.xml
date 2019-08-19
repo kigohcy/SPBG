@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="
+       	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+       	http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<camel:camelContext id="camelHostReqResend"
+		xmlns:camel="http://camel.apache.org/schema/spring">
+		<!-- 處理主機重送交易 -->
+		<camel:route id="camelHostReqResend-process">
+			<camel:from
+				uri="sql:{{host.req.sql.select.adm.resent.txndetail.batch.where.non24hr}}?consumer.delay=1000" />
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${body} !=
+						null
+					</camel:simple>
+					<camel:to
+						uri="bean:hostReqUpdateTxnDetailPendingProcess?method=process" />
+					<!-- 載入參數表 -->
+					<camel:to uri="bean:loadParametersIntoHeaderProcess?method=process" />
+					<camel:setHeader headerName="HOST_R_detailUnitId">
+						<camel:simple>${header['detailUnitId']}</camel:simple>
+					</camel:setHeader>
+					<camel:log loggingLevel="INFO"
+						message="Resend HOST_R_detailUnitId into Host Request queue: ${header['HOST_R_detailUnitId']}" />
+					<camel:to
+						uri="jms:HOST_REQUEST?jmsMessageType=text&amp;concurrentConsumers=1&amp;maxConcurrentConsumers=2" />
+					<camel:otherwise>
+						<camel:log loggingLevel="TRACE" message="body is null" />
+					</camel:otherwise>
+				</camel:when>
+			</camel:choice>
+		</camel:route>
+	</camel:camelContext>
+</beans>
+
