@@ -238,6 +238,7 @@ if (procStatus==null){
 		<c:if test="${HostTxs.dnldFlag == '2'}">(2)已入戶</c:if>
 		<c:if test="${HostTxs.dnldFlag == '3'}">(3)待解款</c:if>
 		<c:if test="${HostTxs.dnldFlag == '4'}">(4)交易失敗</c:if>
+		<c:if test="${HostTxs.dnldFlag == '5'}">(5)已扣/退款</c:if>
 	</td>
 	<td nowrap align="center">
 	  <c:if test="${HostTxs.rtflag == '0'}">(0)FEDI</c:if>
